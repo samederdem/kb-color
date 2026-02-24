@@ -18,6 +18,7 @@
 #include <sys/ioctl.h>
 #include <linux/hidraw.h>
 #include <limits.h>
+#include <sys/stat.h>
 
 /* Device identification */
 #define VENDOR_ID           0x1044
@@ -52,8 +53,11 @@
 #define BRIGHTNESS_MAX      100
 
 /* State file */
-#define STATE_FILE_NAME     ".kb-color-state"
-#define STATE_FILE_FALLBACK "/root"
+#define STATE_DIR_XDG       "XDG_CONFIG_HOME"   /* env var to check first      */
+#define STATE_DIR_FALLBACK  ".config"            /* relative to HOME if not set */
+#define STATE_APP_DIR       "kb-color"
+#define STATE_FILE_NAME     "state"
+#define STATE_HOME_FALLBACK "/root"
 
 static const struct { const char *name; uint8_t id; } COLORS[COLOR_COUNT] = {
     { "red",    1 },
@@ -69,13 +73,32 @@ typedef struct { uint8_t color_id; uint8_t brightness; } State;
 
 static const char *state_path(void) {
     static char path[PATH_MAX];
-    const char *home = getenv("HOME");
-    if (!home) home = STATE_FILE_FALLBACK;
-    snprintf(path, sizeof(path), "%s/%s", home, STATE_FILE_NAME);
+    const char *xdg = getenv(STATE_DIR_XDG);
+    if (xdg) {
+        snprintf(path, sizeof(path), "%s/%s/%s", xdg, STATE_APP_DIR, STATE_FILE_NAME);
+    } else {
+        const char *home = getenv("HOME");
+        if (!home) home = STATE_HOME_FALLBACK;
+        snprintf(path, sizeof(path), "%s/%s/%s/%s", home, STATE_DIR_FALLBACK, STATE_APP_DIR, STATE_FILE_NAME);
+    }
     return path;
 }
 
+static void ensure_state_dir(void) {
+    const char *xdg = getenv(STATE_DIR_XDG);
+    char dir[PATH_MAX];
+    if (xdg) {
+        snprintf(dir, sizeof(dir), "%s/%s", xdg, STATE_APP_DIR);
+    } else {
+        const char *home = getenv("HOME");
+        if (!home) home = STATE_HOME_FALLBACK;
+        snprintf(dir, sizeof(dir), "%s/%s/%s", home, STATE_DIR_FALLBACK, STATE_APP_DIR);
+    }
+    mkdir(dir, 0755);
+}
+
 static void save_state(uint8_t color_id, uint8_t brightness) {
+    ensure_state_dir();
     FILE *f = fopen(state_path(), "wb");
     if (!f) return;
     State s = { color_id, brightness };
